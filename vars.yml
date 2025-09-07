@@ -1,0 +1,31 @@
+---
+# LDAP настройки (исправленные согласно диагностике)
+ldap_admin_password: "admin123"
+ldap_domain: "nodomain"  # ← Измените!
+ldap_organization: "Example Company"
+ldap_base_dn: "dc=nodomain"  # ← Измените!
+
+# Пользователи и группы (остаются без изменений)
+ldap_users:
+  - username: "user1"
+    givenname: "Иван"
+    surname: "Иванов"
+    password: "user1pass"
+    uid: 1001
+    gid: 1001
+
+  - username: "user2"
+    givenname: "Петр"
+    surname: "Петров"
+    password: "user2pass"
+    uid: 1002
+    gid: 1002
+
+ldap_groups:
+  - name: "developers"
+    gid: 5001
+    description: "Development Team"
+
+  - name: "managers"
+    gid: 5002
+    description: "Management Team"

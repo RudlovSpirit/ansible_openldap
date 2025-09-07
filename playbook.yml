@@ -1,0 +1,113 @@
+---
+- name: Install and configure OpenLDAP server
+  hosts: ldap_servers
+  become: yes
+  vars_files:
+    - vars.yml
+
+  tasks:
+    # Обновление системы
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    # Установка OpenLDAP сервера и утилит
+    - name: Install OpenLDAP server and utilities
+      apt:
+        name:
+          - slapd
+          - ldap-utils
+          - ldapscripts
+        state: present
+      notify:
+        - Restart slapd
+
+    # Переконфигурация slapd для установки домена и пароля
+    - name: Reconfigure slapd with debconf
+      debconf:
+        name: slapd
+        question: "{{ item.question }}"
+        value: "{{ item.value }}"
+        vtype: "{{ item.vtype }}"
+      with_items:
+        - { question: 'slapd/internal/adminpw', value: '{{ ldap_admin_password }}', vtype: 'password' }
+        - { question: 'slapd/internal/generated_adminpw', value: '{{ ldap_admin_password }}', vtype: 'password' }
+        - { question: 'slapd/password1', value: '{{ ldap_admin_password }}', vtype: 'password' }
+        - { question: 'slapd/password2', value: '{{ ldap_admin_password }}', vtype: 'password' }
+        - { question: 'slapd/domain', value: '{{ ldap_domain }}', vtype: 'string' }
+        - { question: 'slapd/allow_ldap_v2', value: 'false', vtype: 'boolean' }
+        - { question: 'slapd/no_configuration', value: 'false', vtype: 'boolean' }
+        - { question: 'slapd/move_old_database', value: 'true', vtype: 'boolean' }
+        - { question: 'slapd/purge_database', value: 'false', vtype: 'boolean' }
+      notify:
+        - Restart slapd
+
+    # Создание базовой структуры LDAP
+    - name: Create base LDIF structure
+      copy:
+        content: |
+          dn: {{ ldap_base_dn }}
+          objectClass: top
+          objectClass: dcObject
+          objectClass: organization
+          o: {{ ldap_organization }}
+          dc: {{ ldap_base_dn.split(',dc=')[0].split('dc=')[1] }}
+
+          dn: ou=people,{{ ldap_base_dn }}
+          objectClass: organizationalUnit
+          ou: people
+
+          dn: ou=groups,{{ ldap_base_dn }}
+          objectClass: organizationalUnit
+          ou: groups
+        dest: /tmp/base.ldif
+
+    # Добавление базовой структуры в LDAP
+    - name: Add base structure to LDAP
+      command: ldapadd -x -D cn=admin,{{ ldap_base_dn }} -w {{ ldap_admin_password }} -f /tmp/base.ldif
+      register: base_result
+      failed_when: base_result.rc != 0 and "Already exists" not in base_result.stderr
+
+    # Создание LDIF файлов для групп
+    - name: Create groups LDIF
+      template:
+        src: templates/group.ldif.j2
+        dest: "/tmp/group_{{ item.name }}.ldif"
+      with_items: "{{ ldap_groups }}"
+
+    # Добавление групп в LDAP
+    - name: Add groups to LDAP
+      command: ldapadd -x -D cn=admin,{{ ldap_base_dn }} -w {{ ldap_admin_password }} -f /tmp/group_{{ item.name }}.ldif
+      with_items: "{{ ldap_groups }}"
+      register: group_result
+      failed_when: group_result.rc != 0 and "Already exists" not in group_result.stderr
+
+    # Создание LDIF файлов для пользователей
+    - name: Create users LDIF
+      template:
+        src: templates/user.ldif.j2
+        dest: "/tmp/user_{{ item.username }}.ldif"
+      with_items: "{{ ldap_users }}"
+
+    # Добавление пользователей в LDAP
+    - name: Add users to LDAP
+      command: ldapadd -x -D cn=admin,{{ ldap_base_dn }} -w {{ ldap_admin_password }} -f /tmp/user_{{ item.username }}.ldif
+      with_items: "{{ ldap_users }}"
+      register: user_result
+      failed_when: user_result.rc != 0 and "Already exists" not in user_result.stderr
+
+    # Настройка firewall для LDAP
+    - name: Configure firewall for LDAP (iptables)
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 389
+        jump: ACCEPT
+        comment: "Allow LDAP traffic"
+
+  handlers:
+    - name: Restart slapd
+      service:
+        name: slapd
+        state: restarted
