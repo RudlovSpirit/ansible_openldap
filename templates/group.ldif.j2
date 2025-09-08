@@ -1,0 +1,6 @@
+dn: cn={{ item.name }},ou=groups,{{ ldap_base_dn }}
+objectClass: top
+objectClass: posixGroup
+cn: {{ item.name }}
+gidNumber: {{ item.gid }}
+description: {{ item.description }}

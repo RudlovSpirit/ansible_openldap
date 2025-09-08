@@ -63,11 +63,11 @@
           ou: groups
         dest: /tmp/base.ldif
 
-    # Добавление базовой структуры в LDAP
-    - name: Add base structure to LDAP
-      command: ldapadd -x -D cn=admin,{{ ldap_base_dn }} -w {{ ldap_admin_password }} -f /tmp/base.ldif
-      register: base_result
-      failed_when: base_result.rc != 0 and "Already exists" not in base_result.stderr
+    - name: Add base structure to LDAP using external auth
+      become: yes
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/base.ldif
+      register: ldap_result
+      failed_when: ldap_result.rc != 0 and "Already exists" not in ldap_result.stderr
 
     # Создание LDIF файлов для групп
     - name: Create groups LDIF
@@ -76,12 +76,38 @@
         dest: "/tmp/group_{{ item.name }}.ldif"
       with_items: "{{ ldap_groups }}"
 
+    - name: Add missing organizational units
+      become: yes
+      copy:
+        content: |
+          dn: ou=people,dc=nodomain
+          objectClass: organizationalUnit
+          ou: people
+
+          dn: ou=groups,dc=nodomain
+          objectClass: organizationalUnit
+          ou: groups
+        dest: /tmp/missing_ous.ldif
+
+    - name: Add OUs to LDAP
+      become: yes
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/missing_ous.ldif
+      register: ou_result
+      failed_when: >
+        ou_result.rc != 0 and 
+        "Already exists" not in ou_result.stderr
+
     # Добавление групп в LDAP
-    - name: Add groups to LDAP
-      command: ldapadd -x -D cn=admin,{{ ldap_base_dn }} -w {{ ldap_admin_password }} -f /tmp/group_{{ item.name }}.ldif
+    - name: Add groups to LDAP using external auth
+      become: yes
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/group_{{ item.name }}.ldif
       with_items: "{{ ldap_groups }}"
       register: group_result
-      failed_when: group_result.rc != 0 and "Already exists" not in group_result.stderr
+      failed_when: >
+        group_result.rc != 0 and 
+        "Already exists" not in group_result.stderr and
+        "Type or value exists" not in group_result.stderr
+
 
     # Создание LDIF файлов для пользователей
     - name: Create users LDIF
@@ -91,11 +117,16 @@
       with_items: "{{ ldap_users }}"
 
     # Добавление пользователей в LDAP
-    - name: Add users to LDAP
-      command: ldapadd -x -D cn=admin,{{ ldap_base_dn }} -w {{ ldap_admin_password }} -f /tmp/user_{{ item.username }}.ldif
+    - name: Add users to LDAP using external auth
+      become: yes
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /tmp/user_{{ item.username }}.ldif
       with_items: "{{ ldap_users }}"
       register: user_result
-      failed_when: user_result.rc != 0 and "Already exists" not in user_result.stderr
+      failed_when: >
+        user_result.rc != 0 and 
+        "Already exists" not in user_result.stderr and
+        "Type or value exists" not in user_result.stderr
+
 
     # Настройка firewall для LDAP
     - name: Configure firewall for LDAP (iptables)
